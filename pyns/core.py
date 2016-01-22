@@ -1,9 +1,11 @@
 from ast import *
+from .matching import *
 from functools import wraps
 
 import re
 import sys
 import inspect
+import collections
 import io
 
 
@@ -15,12 +17,87 @@ def macros_enabled():
 
 
 class Macro:
-    """Class whose instances represent a macro. An instance can be used under several names, which is why it is passed
-    when manipulating. The manipulation happens only once by instrumented module.
+    """A macro consists into matchers and instrumentation functions.
+
+    Here's a very simple example:
+
+    class q(Macro):
+        matchers = {
+            Subscript: lambda name: m_dict(value=m_inst(Name, id=name))
+        }
+
+        def instr_Subscript(self, node):
+            return locate(ast_genast(node), node)
+    """
+    matchers = {
+        # UnaryOp: lambda name: m_dict(m_inst(), id=name),
+        # ...
+    }
+
+    can_interfere = False
+
+    def __init__(self, name, **kwargs):
+        self.name = name
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+        self.matchers = {k: v(name) for k, v in self.matchers.items()}
+
+    def instr(self, node):
+        method = 'instr_'+node.__class__.__name__
+        visitor = getattr(self, method)
+        return visitor(node)
+
+
+def macro_inline(f=None, *, allow_interferences=False):
+    def _(f):
+        class _InlineMacro(Macro):
+            can_interfere = allow_interferences
+            matchers = {
+                Subscript: lambda name: m_dict(value=m_inst(Name, id=name))
+            }
+
+            def __init__(self, name, **kwargs):
+                Macro.__init__(self, name)
+                self.kwargs = kwargs
+
+            def instr_Subscript(self, node):
+                return f(node.slice.value, **self.kwargs)
+
+        return _InlineMacro
+
+    if f is not None:
+        return _(f)
+    return _
+
+
+def locate(newnode, oldnode):
+    return fix_missing_locations(copy_location(newnode, oldnode))
+
+
+class MacroVisitor(NodeTransformer):
+    """Given a dictionary, registers the macros using their name, then it is
+    able to apply all the modifications.
     """
 
-    def manipulate(self, name, tree):
-        return tree
+    def __init__(self, candidates):
+        self.macros = collections.defaultdict(list)
+        for name, cls in candidates.items():
+            if isinstance(cls, type) and issubclass(cls, Macro):
+                current = cls(name, macro_visitor=self)
+                for nodecls, matcher in current.matchers.items():
+                    self.macros[nodecls].append((matcher, current))
+
+    def visit(self, node):
+        for matcher, macro in self.macros[node.__class__]:
+            if matcher(node):
+                if macro.can_interfere:
+                    node = self.generic_visit(node)
+                return locate(macro.instr(node), node)
+        return self.generic_visit(node)
+
+
+def without_macros():
+    return _ast is None
 
 
 def with_macros(name, globals, locals):
@@ -41,9 +118,8 @@ def with_macros(name, globals, locals):
         _ast = parse(inspect.getsource(_mod), _mod.__file__, 'exec')
 
         # we look for global macros, use them on the module using their name
-        for k, v in globals.items():
-            if isinstance(v, Macro):
-                _ast = v.manipulate(k, _ast)
+        m = MacroVisitor(globals)
+        _ast = m.visit(_ast)
 
         exec(compile(_ast, _mod.__file__, 'exec'), globals, locals)
         _ast = None
@@ -77,15 +153,98 @@ def compile_with_macros(globals, locals):
         if macros_enabled():
             return f
 
-        mod = inspect.getmodule(f)
+        # get the ast from the source of the function
         ast = parse(strip_decorators(inspect.getsource(f)))
-        for k, v in globals.items():
-            if isinstance(v, Macro):
-                ast = v.manipulate(k, ast)
+
+        # we look for global macros, use them on the source using their name
+        m = MacroVisitor(globals)
+        ast = m.visit(ast)
+
         exec(compile(ast, f.__name__, 'exec'), globals, locals)
         return eval(f.__name__, globals, locals)
 
     return _
+
+def ast_repr(thing, omit=None):
+    """From an AST node, will build an expression that can be evaluated to build it.
+    How is that useful?
+
+    Imagine you type some code a+3 somewhere, and you want to recover the AST to manipulate it, like to replace a by a
+    constant. You can run
+
+    eval(real_repr(ast.parse('a+3', mode='eval').body))
+                         |------ Provides the nodes
+             |------ converts the nodes to a string
+      |--- creates new nodes
+
+    to obtain the AST node.
+    """
+    if omit is not None:
+        o = omit(thing)
+        if o is not None:
+            return o
+    if isinstance(thing, AST):
+        fields = [ast_repr(b, omit) for _, b in iter_fields(thing)]
+        return '%s(%s)' % (thing.__class__.__name__, ', '.join(fields))
+    elif isinstance(thing, list):
+        return '[%s]' % ', '.join((ast_repr(t, omit) for t in thing))
+    return repr(thing)
+
+
+def unparse(tree):
+    """We generate the python code from its AST
+    """
+    if isinstance(tree, list):
+        return [CodeGenerator().visit(t) for t in tree]
+    return CodeGenerator().visit(tree)
+
+
+def _ast_genast(tree, specific=None):
+    """Generates an AST that, when evaluated, will return the AST it as been generated from.
+    as_is_matcher is a function returning true when we don't want to expand the inner expression anymore.
+    """
+    if isinstance(tree, AST):
+        if specific is not None:
+            val = specific(tree)
+            if val is not None:
+                return val
+        params = []
+        for _, value in iter_fields(tree):
+            params.append(ast_genast(value, specific))
+        return Call(func=Name(tree.__class__.__name__, Load()), args=params, keywords=[])
+    if isinstance(tree, list):
+        elems = []
+        for e in tree:
+            elems.append(ast_genast(e, specific))
+        return List(elems, Load())
+    if tree is None or tree is True or tree is False:
+        return NameConstant(tree)
+    if isinstance(tree, (int, float, complex)):
+        return Num(tree)
+    if isinstance(tree, str):
+        return Str(tree)
+    return tree
+
+def ast_genast(tree, specific=None):
+    return _ast_genast(tree, specific)
+
+def comp_expr(ast, name=None):
+    if name is None:
+        name = unparse_code(ast)
+    return compile(ast if isinstance(ast, Expression) else Expression(ast), name, 'eval')
+
+def comp_block(ast, name=None):
+    if name is None:
+        name = unparse_code(ast)
+    return compile(ast, '\n'.join(name), 'exec')
+
+#    ###     ######  ########    ##     ##  #######  ########  #### ######## #### ######## ########
+#   ## ##   ##    ##    ##       ###   ### ##     ## ##     ##  ##  ##        ##  ##       ##     ##
+#  ##   ##  ##          ##       #### #### ##     ## ##     ##  ##  ##        ##  ##       ##     ##
+# ##     ##  ######     ##       ## ### ## ##     ## ##     ##  ##  ######    ##  ######   ########
+# #########       ##    ##       ##     ## ##     ## ##     ##  ##  ##        ##  ##       ##   ##
+# ##     ## ##    ##    ##       ##     ## ##     ## ##     ##  ##  ##        ##  ##       ##    ##
+# ##     ##  ######     ##       ##     ##  #######  ########  #### ##       #### ######## ##     ##
 
 
 def ASTModifier(f):
@@ -112,6 +271,16 @@ def no_ast(f):
     """
     delattr(f, 'ast')
     return f
+
+
+#  ######   #######  ########  ########     ######   ######## ##    ## ######## ########     ###    ########  #######  ########
+# ##    ## ##     ## ##     ## ##          ##    ##  ##       ###   ## ##       ##     ##   ## ##      ##    ##     ## ##     ##
+# ##       ##     ## ##     ## ##          ##        ##       ####  ## ##       ##     ##  ##   ##     ##    ##     ## ##     ##
+# ##       ##     ## ##     ## ######      ##   #### ######   ## ## ## ######   ########  ##     ##    ##    ##     ## ########
+# ##       ##     ## ##     ## ##          ##    ##  ##       ##  #### ##       ##   ##   #########    ##    ##     ## ##   ##
+# ##    ## ##     ## ##     ## ##          ##    ##  ##       ##   ### ##       ##    ##  ##     ##    ##    ##     ## ##    ##
+#  ######   #######  ########  ########     ######   ######## ##    ## ######## ##     ## ##     ##    ##     #######  ##     ##
+
 
 class CodeGenerator(NodeVisitor):
 
@@ -247,77 +416,3 @@ class CodeGenerator(NodeVisitor):
 
     def visit_NameConstant(self,node: NameConstant):return str(node.value)
     def visit_Global(self,      node: Global):      return 'global %s' % ', '.join(node.names)
-
-
-def ast_repr(thing, omit=None):
-    """From an AST node, will build an expression that can be evaluated to build it.
-    How is that useful?
-
-    Imagine you type some code a+3 somewhere, and you want to recover the AST to manipulate it, like to replace a by a
-    constant. You can run
-
-    eval(real_repr(ast.parse('a+3', mode='eval').body))
-                         |------ Provides the nodes
-             |------ converts the nodes to a string
-      |--- creates new nodes
-
-    to obtain the AST node.
-    """
-    if omit is not None:
-        o = omit(thing)
-        if o is not None:
-            return o
-    if isinstance(thing, AST):
-        fields = [ast_repr(b, omit) for _, b in iter_fields(thing)]
-        return '%s(%s)' % (thing.__class__.__name__, ', '.join(fields))
-    elif isinstance(thing, list):
-        return '[%s]' % ', '.join((ast_repr(t, omit) for t in thing))
-    return repr(thing)
-
-
-def unparse(tree):
-    """We generate the python code from its AST
-    """
-    if isinstance(tree, list):
-        return [CodeGenerator().visit(t) for t in tree]
-    return CodeGenerator().visit(tree)
-
-
-def _ast_genast(tree, specific=None):
-    """Generates an AST that, when evaluated, will return the AST it as been generated from.
-    as_is_matcher is a function returning true when we don't want to expand the inner expression anymore.
-    """
-    if isinstance(tree, AST):
-        if specific is not None:
-            val = specific(tree)
-            if val is not None:
-                return val
-        params = []
-        for _, value in iter_fields(tree):
-            params.append(ast_genast(value, specific))
-        return Call(func=Name(tree.__class__.__name__, Load()), args=params, keywords=[])
-    if isinstance(tree, list):
-        elems = []
-        for e in tree:
-            elems.append(ast_genast(e, specific))
-        return List(elems, Load())
-    if tree is None or tree is True or tree is False:
-        return NameConstant(tree)
-    if isinstance(tree, (int, float, complex)):
-        return Num(tree)
-    if isinstance(tree, str):
-        return Str(tree)
-    return tree
-
-def ast_genast(tree, specific=None):
-    return _ast_genast(tree, specific)
-
-def comp_expr(ast, name=None):
-    if name is None:
-        name = unparse_code(ast)
-    return compile(ast if isinstance(ast, Expression) else Expression(ast), name, 'eval')
-
-def comp_block(ast, name=None):
-    if name is None:
-        name = unparse_code(ast)
-    return compile(ast, '\n'.join(name), 'exec')

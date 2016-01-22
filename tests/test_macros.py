@@ -1,3 +1,4 @@
+import config
 from pyns.macros import *
 from unittest import TestCase, main
 
@@ -7,34 +8,30 @@ def assertRepr(a, b):
     assert str_a == str_b, '%s should be the same as %s' % (str_a, str_b)
 
 
-@trans_macro
 @compile_with_macros(globals(), locals())
-class asrteq(NodeTransformer):
+class asrteq(Macro):
+    can_interfere = True
+    matchers = {
+        Call: lambda name: m_dict(func=m_inst(Name, id=name), args=list, args__len=2)
+    }
 
-    def __init__(self, name):
-        self.matcher = m_dict(func=m_inst(Name, id=name), args=list, args__len=2)
-
-    def visit_Call(self, node: Call):
-        if self.matcher(node):
-            a, b = node.args
-            n = q[self.assertEqual(u[a], u[b])]
-            return locate(n, node)
-        return self.generic_visit(node)
+    def instr_Call(self, node: Call):
+        a, b = node.args
+        n = q[self.assertEqual(u[a], u[b])]
+        return locate(n, node)
 
 
-@trans_macro
 @compile_with_macros(globals(), locals())
-class asrtast(NodeTransformer):
+class asrtast(Macro):
+    can_interfere = True
+    matchers = {
+        Call: lambda name: m_dict(func=m_inst(Name, id=name), args=list, args__len=2)
+    }
 
-    def __init__(self, name):
-        self.matcher = m_dict(func=m_inst(Name, id=name), args=list, args__len=2)
-
-    def visit_Call(self, node: Call):
-        if self.matcher(node):
-            a, b = node.args
-            n = q[assertRepr(u[a], u[b])]
-            return locate(n, node)
-        return self.generic_visit(node)
+    def instr_Call(self, node: Call):
+        a, b = node.args
+        n = q[assertRepr(u[a], u[b])]
+        return locate(n, node)
 
 
 if __name__ == '__main__' and with_macros(__name__, globals(), locals()):
@@ -80,7 +77,6 @@ if __name__ == '__main__' and with_macros(__name__, globals(), locals()):
 
         def test_quicklambdas(self):
             asrteq(f[_0*_1](4, 2), 8)
-            asrteq(q[u[f[1]]](), 1)
             asrtast(f[q[x]](), q[x])
 
             args_f = f["{}".format(_macro_args)]
@@ -93,6 +89,9 @@ if __name__ == '__main__' and with_macros(__name__, globals(), locals()):
             asrteq(f[s[x]](), x)
             asrteq(f[s["lol"]](), x)
             asrteq(f[_0](s["{x}"]), x)
+
+            asrtast(q[ast[f[3]()]], Num(3))
+            asrteq(q[u[f[1]]](), 1)
 
             asrteq(f[s["{_macro_args}"]](), '()')
 
