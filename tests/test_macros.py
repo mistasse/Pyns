@@ -11,9 +11,11 @@ def assertRepr(a, b):
 @compile_with_macros(globals(), locals())
 class asrteq(Macro):
     can_interfere = True
-    matchers = {
-        Call: lambda name: m_dict(func=m_inst(Name, id=name), args=list, args__len=2)
-    }
+
+    def matchers(self, name):
+        return {
+            Call: m_dict(func=m_inst(Name, id=name), args=list, args__len=2)
+        }
 
     def instr_Call(self, node: Call):
         a, b = node.args
@@ -24,9 +26,11 @@ class asrteq(Macro):
 @compile_with_macros(globals(), locals())
 class asrtast(Macro):
     can_interfere = True
-    matchers = {
-        Call: lambda name: m_dict(func=m_inst(Name, id=name), args=list, args__len=2)
-    }
+
+    def matchers(self, name):
+        return {
+            Call: m_dict(func=m_inst(Name, id=name), args=list, args__len=2)
+        }
 
     def instr_Call(self, node: Call):
         a, b = node.args
@@ -34,7 +38,20 @@ class asrtast(Macro):
         return locate(n, node)
 
 
+@macro_block
+def execute(items, body):
+    print(ast_repr(body))
+    return body
+
+
 if __name__ == '__main__' and with_macros(__name__, globals(), locals()):
+
+    class BlockTest(TestCase):
+
+        def test_block_macro(self):
+            with q as x, None:
+                print('yolo'+u[5/3])
+            print(ast_repr(x))
 
     class JustDefinedTest(TestCase):
 

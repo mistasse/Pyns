@@ -16,6 +16,18 @@ def macros_enabled():
     return _ast is not None
 
 
+# ##     ##    ###     ######  ########   #######   ######
+# ###   ###   ## ##   ##    ## ##     ## ##     ## ##    ##
+# #### ####  ##   ##  ##       ##     ## ##     ## ##
+# ## ### ## ##     ## ##       ########  ##     ##  ######
+# ##     ## ######### ##       ##   ##   ##     ##       ##
+# ##     ## ##     ## ##    ## ##    ##  ##     ## ##    ##
+# ##     ## ##     ##  ######  ##     ##  #######   ######
+
+
+# TODO: One instantiator fir mixing macros
+
+
 class Macro:
     """A macro consists into matchers and instrumentation functions.
 
@@ -29,10 +41,6 @@ class Macro:
         def instr_Subscript(self, node):
             return locate(ast_genast(node), node)
     """
-    matchers = {
-        # UnaryOp: lambda name: m_dict(m_inst(), id=name),
-        # ...
-    }
 
     can_interfere = False
 
@@ -40,7 +48,13 @@ class Macro:
         self.name = name
         for k, v in kwargs.items():
             setattr(self, k, v)
-        self.matchers = {k: v(name) for k, v in self.matchers.items()}
+        self.matchers = self.matchers(name)
+
+    def matchers(self, name):
+        return {
+            # UnaryOp: lambda name: m_dict(m_inst(), id=name),
+            # ...
+        }
 
     def instr(self, node):
         method = 'instr_'+node.__class__.__name__
@@ -48,29 +62,110 @@ class Macro:
         return visitor(node)
 
 
+class MacroMixer():
+
+    def __init__(self, allow_interferences=False):
+        self.allow_interferences = allow_interferences
+        self.macros = macros = []
+        mixer = self
+
+        class _MixedMacro(Macro):
+            can_interfere = self.allow_interferences
+
+            def __init__(self, name, **kwargs):
+                self.macros = []
+                self.handlers = {}
+                for m in macros:
+                    self.macros.append(m(name, **kwargs))
+                Macro.__init__(self, name, **kwargs)
+
+            def matchers(self, name):
+                matchers = {}
+                for m in self.macros:
+                    matchers.update(m.matchers)
+                    for k in m.matchers:
+                        self.handlers[k] = m
+                return matchers
+
+            def instr(self, node):
+                handler = self.handlers[node.__class__]
+                return handler.instr(node)
+
+            @classmethod
+            def register(cls, macro):
+                return mixer.register(macro)
+
+        self.cls = _MixedMacro
+
+    def register(self, macro):
+        self.macros.append(macro)
+        return self.cls
+
+
 def macro_inline(f=None, *, allow_interferences=False):
     def _(f):
         class _InlineMacro(Macro):
             can_interfere = allow_interferences
-            matchers = {
-                Subscript: lambda name: m_dict(value=m_inst(Name, id=name))
-            }
 
             def __init__(self, name, **kwargs):
                 Macro.__init__(self, name)
                 self.kwargs = kwargs
+
+            def matchers(self, name):
+                return {
+                    Subscript: m_dict(value=m_inst(Name, id=name))
+                }
 
             def instr_Subscript(self, node):
                 return f(node.slice.value, **self.kwargs)
 
         return _InlineMacro
 
-    if f is not None:
-        return _(f)
-    return _
+    return _(f) if f is not None else _
+
+
+def macro_block(f=None, allow_interferences=False):
+    def _(f):
+        class _BlockMacro(Macro):
+            can_interfere = allow_interferences
+
+            def __init__(self, name, **kwargs):
+                Macro.__init__(self, name)
+                self.kwargs = kwargs
+
+            def matchers(self, name):
+                self.item_matcher = m_inst(withitem, context_expr=m_inst(Name, id=name))
+                return {
+                    With: m_dict(items=m_any(self.item_matcher))
+                }
+
+            def instr_With(self, node):
+                var = None
+                items = []
+                for i in node.items:
+                    if self.item_matcher(i):
+                        var = i.optional_vars
+                    else:
+                        items.append(i)
+                return f(var, items, node.body, **self.kwargs)
+
+        return _BlockMacro
+
+    return _(f) if f is not None else _
+
+
+# ##     ## ####  ######  #### ########  #######  ########
+# ##     ##  ##  ##    ##  ##     ##    ##     ## ##     ##
+# ##     ##  ##  ##        ##     ##    ##     ## ##     ##
+# ##     ##  ##   ######   ##     ##    ##     ## ########
+#  ##   ##   ##        ##  ##     ##    ##     ## ##   ##
+#   ## ##    ##  ##    ##  ##     ##    ##     ## ##    ##
+#    ###    ####  ######  ####    ##     #######  ##     ##
 
 
 def locate(newnode, oldnode):
+    if isinstance(newnode, list):
+        return newnode
     return fix_missing_locations(copy_location(newnode, oldnode))
 
 
@@ -94,6 +189,15 @@ class MacroVisitor(NodeTransformer):
                     node = self.generic_visit(node)
                 return locate(macro.instr(node), node)
         return self.generic_visit(node)
+
+
+# ########   #######   #######  ########  ######  ######## ########     ###    ########
+# ##     ## ##     ## ##     ##    ##    ##    ##    ##    ##     ##   ## ##   ##     ##
+# ##     ## ##     ## ##     ##    ##    ##          ##    ##     ##  ##   ##  ##     ##
+# ########  ##     ## ##     ##    ##     ######     ##    ########  ##     ## ########
+# ##     ## ##     ## ##     ##    ##          ##    ##    ##   ##   ######### ##
+# ##     ## ##     ## ##     ##    ##    ##    ##    ##    ##    ##  ##     ## ##
+# ########   #######   #######     ##     ######     ##    ##     ## ##     ## ##
 
 
 def without_macros():
@@ -164,6 +268,16 @@ def compile_with_macros(globals, locals):
         return eval(f.__name__, globals, locals)
 
     return _
+
+
+# ########  ######## ########  ########   ######
+# ##     ## ##       ##     ## ##     ## ##    ##
+# ##     ## ##       ##     ## ##     ## ##
+# ########  ######   ########  ########   ######
+# ##   ##   ##       ##        ##   ##         ##
+# ##    ##  ##       ##        ##    ##  ##    ##
+# ##     ## ######## ##        ##     ##  ######
+
 
 def ast_repr(thing, omit=None):
     """From an AST node, will build an expression that can be evaluated to build it.
@@ -292,7 +406,7 @@ class CodeGenerator(NodeVisitor):
     def visit_ImportFrom(self,  node: ImportFrom):  return 'from %s%s import %s' % ('.'*node.level, node.module, ', '.join(self.visit(n) for n in node.names))
     def visit_alias(self,       node: alias):       return '%s as %s' if node.asname else node.name
     def visit_Assign(self,      node: Assign):      return '%s = %s' % (', '.join((self.visit(t) for t in node.targets)), self.visit(node.value))
-    def visit_With(self, node: With): return 'with %s:\n%s' % (', '.join(self.visit(n) for n in node.items), self.shiftright(node.body))
+    def visit_With(self,        node: With):        return 'with %s:\n%s' % (', '.join(self.visit(n) for n in node.items), self.shiftright(node.body))
     def visit_withitem(self,    node: withitem):    return '%s as %s' % (self.visit(node.context_expr), self.visit(node.optional_vars)) if node.optional_vars else self.visit(node.context_expr)
 
     def visit_If(self, node: If):

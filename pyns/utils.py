@@ -2,6 +2,7 @@ from contextlib import contextmanager
 
 _empty = object()
 
+
 @contextmanager
 def tmp_attr(obj, **kwargs):
     early = {}

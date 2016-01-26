@@ -144,6 +144,8 @@ def m_or(*matchers):
 
         return False
 
+    return match
+
 
 def m_all(matcher):
     def match(a, offset=0):
