@@ -1,12 +1,16 @@
 from ast import *
 from .matching import *
 from functools import wraps
+from contextlib import contextmanager
 
 import re
 import sys
 import inspect
 import collections
 import io
+
+
+# TODO: Add import bootstrap
 
 
 _ast = None
@@ -23,9 +27,6 @@ def macros_enabled():
 # ##     ## ######### ##       ##   ##   ##     ##       ##
 # ##     ## ##     ## ##    ## ##    ##  ##     ## ##    ##
 # ##     ## ##     ##  ######  ##     ##  #######   ######
-
-
-# TODO: One instantiator fir mixing macros
 
 
 class Macro:
@@ -198,6 +199,27 @@ class MacroVisitor(NodeTransformer):
 # ##     ## ##     ## ##     ##    ##          ##    ##    ##   ##   ######### ##
 # ##     ## ##     ## ##     ##    ##    ##    ##    ##    ##    ##  ##     ## ##
 # ########   #######   #######     ##     ######     ##    ##     ## ##     ## ##
+
+
+from _frozen_importlib_external import PathFinder as _PathFinder
+
+
+class PathFinder(_PathFinder):
+    @classmethod
+    def find_spec(cls, fullname, path=None, target=None):
+        ret = _PathFinder.find_spec(fullname, path, target)
+        print(dir(ret.loader))
+        return ret
+
+
+@contextmanager
+def import_macro():
+    copy = sys.meta_path
+    sys.meta_path = [PathFinder if f is _PathFinder else f for f in copy]
+
+    yield
+
+    sys.meta_path = copy
 
 
 def without_macros():

@@ -18,6 +18,7 @@ def tmp_attr(obj, **kwargs):
         else:
             setattr(obj, k, v)
 
+
 def instantiate(f):
     return f()
 
