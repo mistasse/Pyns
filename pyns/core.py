@@ -124,7 +124,7 @@ def macro_inline(f=None, *, allow_interferences=False):
     return _(f) if f is not None else _
 
 
-def macro_block(f=None, allow_interferences=False):
+def macro_block(f=None, *, allow_interferences=False):
     def _(f):
         class _BlockMacro(Macro):
             can_interfere = allow_interferences
@@ -243,7 +243,7 @@ def strip_decorators(src):
     # a = mod(a)
     src = inspect.cleandoc('\n'+src).split('\n')
 
-    # We just find the first line without annotation. The others one are already being executed on the result
+    # We just find the first line without annotation. The other ones are already being executed on the result
     # of the modification
     i = 0
     while _is_annot.match(src[i]) is not None:

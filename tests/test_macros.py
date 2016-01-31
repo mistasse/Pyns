@@ -39,8 +39,7 @@ class asrtast(Macro):
 
 
 @macro_block
-def execute(items, body):
-    print(ast_repr(body))
+def execute(var, items, body, **kwargs):
     return body
 
 
@@ -49,9 +48,18 @@ if __name__ == '__main__' and with_macros(__name__, globals(), locals()):
     class BlockTest(TestCase):
 
         def test_block_macro(self):
-            with q as x, None:
-                print('yolo'+u[5/3])
-            print(ast_repr(x))
+            with q as [a, b], None:
+                pass
+                pass
+            assert isinstance(a, Pass) and isinstance(b, Pass)
+
+            try:
+                with execute, None:
+                    raise AssertionError
+            except AssertionError:
+                assert True
+            else:
+                assert False, 'The block should have raised an exception'
 
     class JustDefinedTest(TestCase):
 
