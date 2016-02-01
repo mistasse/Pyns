@@ -10,7 +10,6 @@ def assertRepr(a, b):
 
 @compile_with_macros(globals(), locals())
 class asrteq(Macro):
-    can_interfere = True
 
     def matchers(self, name):
         return {
@@ -20,12 +19,11 @@ class asrteq(Macro):
     def instr_Call(self, node: Call):
         a, b = node.args
         n = q[self.assertEqual(u[a], u[b])]
-        return locate(n, node)
+        return locate(self.transform(n), node)
 
 
 @compile_with_macros(globals(), locals())
 class asrtast(Macro):
-    can_interfere = True
 
     def matchers(self, name):
         return {
@@ -35,7 +33,7 @@ class asrtast(Macro):
     def instr_Call(self, node: Call):
         a, b = node.args
         n = q[assertRepr(u[a], u[b])]
-        return locate(n, node)
+        return locate(self.transform(n), node)
 
 
 @macro_block

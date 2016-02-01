@@ -43,8 +43,6 @@ class Macro:
             return locate(ast_genast(node), node)
     """
 
-    can_interfere = False
-
     def __init__(self, name, **kwargs):
         self.name = name
         for k, v in kwargs.items():
@@ -65,13 +63,11 @@ class Macro:
 
 class MacroMixer():
 
-    def __init__(self, allow_interferences=False):
-        self.allow_interferences = allow_interferences
+    def __init__(self):
         self.macros = macros = []
         mixer = self
 
         class _MixedMacro(Macro):
-            can_interfere = self.allow_interferences
 
             def __init__(self, name, **kwargs):
                 self.macros = []
@@ -103,10 +99,9 @@ class MacroMixer():
         return self.cls
 
 
-def macro_inline(f=None, *, allow_interferences=False):
+def macro_inline(f=None):
     def _(f):
         class _InlineMacro(Macro):
-            can_interfere = allow_interferences
 
             def __init__(self, name, **kwargs):
                 Macro.__init__(self, name)
@@ -118,17 +113,16 @@ def macro_inline(f=None, *, allow_interferences=False):
                 }
 
             def instr_Subscript(self, node):
-                return f(node.slice.value, **self.kwargs)
+                return locate(f(node.slice.value, container=node, **self.kwargs), node)
 
         return _InlineMacro
 
     return _(f) if f is not None else _
 
 
-def macro_block(f=None, *, allow_interferences=False):
+def macro_block(f=None):
     def _(f):
         class _BlockMacro(Macro):
-            can_interfere = allow_interferences
 
             def __init__(self, name, **kwargs):
                 Macro.__init__(self, name)
@@ -148,7 +142,7 @@ def macro_block(f=None, *, allow_interferences=False):
                         var = i.optional_vars
                     else:
                         items.append(i)
-                return f(var, items, node.body, **self.kwargs)
+                return locate(f(var, items, node.body, container=node, **self.kwargs), node)
 
         return _BlockMacro
 
@@ -165,9 +159,9 @@ def macro_block(f=None, *, allow_interferences=False):
 
 
 def locate(newnode, oldnode):
-    if isinstance(newnode, list):
-        return newnode
-    return fix_missing_locations(copy_location(newnode, oldnode))
+    if isinstance(newnode, AST):
+        return fix_missing_locations(copy_location(newnode, oldnode))
+    return newnode
 
 
 class MacroVisitor(NodeTransformer):
@@ -179,16 +173,16 @@ class MacroVisitor(NodeTransformer):
         self.macros = collections.defaultdict(list)
         for name, cls in candidates.items():
             if isinstance(cls, type) and issubclass(cls, Macro):
-                current = cls(name, macro_visitor=self)
+                current = cls(name, transform=self.visit)
                 for nodecls, matcher in current.matchers.items():
                     self.macros[nodecls].append((matcher, current))
 
     def visit(self, node):
+        if isinstance(node, list):
+            return [self.visit(n) for n in node]
         for matcher, macro in self.macros[node.__class__]:
             if matcher(node):
-                if macro.can_interfere:
-                    node = self.generic_visit(node)
-                return locate(macro.instr(node), node)
+                return macro.instr(node)
         return self.generic_visit(node)
 
 
@@ -208,7 +202,6 @@ class PathFinder(_PathFinder):
     @classmethod
     def find_spec(cls, fullname, path=None, target=None):
         ret = _PathFinder.find_spec(fullname, path, target)
-        print(dir(ret.loader))
         return ret
 
 

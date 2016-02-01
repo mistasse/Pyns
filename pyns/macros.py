@@ -5,44 +5,63 @@ from .matching import *
 # TODO: Rewrite with macros and embedded nodes
 
 
-@isolated
-def _q_specific():
-    u_matcher = m_inst(Subscript, value=m_inst(Name, id='u'))
-    ast_matcher = m_inst(Subscript, value=m_inst(Name, id='ast'))
+class _Embedded(AST):
+    def __init__(self, node):
+        self.node = node
 
-    def q_specific(node):
-        if u_matcher(node):
-            return q.macro_visitor.visit(node.slice.value)
-        if ast_matcher(node):
-            return Call(Name('ast_genast', Load()), [q.macro_visitor.visit(node.slice.value)], [])
-        return None
 
-    return q_specific
+@macro_inline
+def u(node, container, transform, **kwargs):
+    if not q.into:
+        raise AssertionError('Cannot use the u macro without being in a quote')
+    return _Embedded(locate(transform(node), container))
+
+
+@macro_inline
+def ast(node, container, transform, **kwargs):
+    if not q.into:
+        raise AssertionError('Cannot use the ast macro without being in a quote')
+    return _Embedded(locate(Call(Name('ast_genast', Load()), [transform(node)], []), container))
+
+
+def _q_specific(node):
+    if isinstance(node, _Embedded):
+        return node.node
+    return None
 
 
 q = MacroMixer()
+q.into = False
+
 
 @q.register
 @macro_inline
-def q(node, macro_visitor, **kwargs):
-    with tmp_attr(q, macro_visitor=macro_visitor):
-        return ast_genast(node, _q_specific)
+def q(node, container, transform, **kwargs):
+    print(ast_repr(node))
+    with tmp_attr(q, into=True):
+        return locate(ast_genast(transform(node), _q_specific), container)
 
 
 @q.register
 @macro_block
-def q(var, items, body, macro_visitor, **kwargs):
-    with tmp_attr(q, macro_visitor=macro_visitor):
-        return Assign(targets=[var], value=ast_genast(body, _q_specific))
+def q(var, items, body, container, transform, **kwargs):
+    with tmp_attr(q, into=True):
+        return locate(Assign(targets=[var], value=ast_genast(transform(body), _q_specific)), container)
+
+
+@isolated
+@compile_with_macros(globals(), locals())
+def test():
+    print(ast_repr(q[2*u[2]]))
 
 
 @macro_inline
 @compile_with_macros(globals(), locals())
-def s(node, **kwargs):
-    return q[u[node].format(**locals())]
+def s(node, container, transform, **kwargs):
+    return locate(q[u[transform(node)].format(**locals())], container)
 
 
-@macro_inline(allow_interferences=True)
+@macro_inline
 @instantiate
 @compile_with_macros(globals(), locals())
 class f(NodeTransformer):
@@ -54,9 +73,9 @@ class f(NodeTransformer):
             return locate(q[_macro_args[u[Num(int(node.id[1:]))]]], node)
         return self.generic_visit(node)
 
-    def __call__(self, node, **kwargs):
+    def __call__(self, node, container, transform, **kwargs):
         # we convert the inner variables
-        value = self.visit(node)
+        value = self.visit(transform(node))
         # we build the anonymous function
         n = q[lambda *_macro_args: u[value]]
-        return n
+        return locate(n, container)
