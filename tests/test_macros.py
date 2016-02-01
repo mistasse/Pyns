@@ -19,7 +19,7 @@ class asrteq(Macro):
     def instr_Call(self, node: Call):
         a, b = node.args
         n = q[self.assertEqual(u[a], u[b])]
-        return locate(self.transform(n), node)
+        return self.transform(n)
 
 
 @compile_with_macros(globals(), locals())
@@ -33,7 +33,7 @@ class asrtast(Macro):
     def instr_Call(self, node: Call):
         a, b = node.args
         n = q[assertRepr(u[a], u[b])]
-        return locate(self.transform(n), node)
+        return self.transform(n)
 
 
 @macro_block

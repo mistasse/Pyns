@@ -113,7 +113,7 @@ def macro_inline(f=None):
                 }
 
             def instr_Subscript(self, node):
-                return locate(f(node.slice.value, container=node, **self.kwargs), node)
+                return f(node.slice.value, container=node, **self.kwargs)
 
         return _InlineMacro
 
@@ -142,7 +142,7 @@ def macro_block(f=None):
                         var = i.optional_vars
                     else:
                         items.append(i)
-                return locate(f(var, items, node.body, container=node, **self.kwargs), node)
+                return f(var, items, node.body, container=node, **self.kwargs)
 
         return _BlockMacro
 
@@ -182,7 +182,7 @@ class MacroVisitor(NodeTransformer):
             return [self.visit(n) for n in node]
         for matcher, macro in self.macros[node.__class__]:
             if matcher(node):
-                return macro.instr(node)
+                return locate(macro.instr(node), node)
         return self.generic_visit(node)
 
 

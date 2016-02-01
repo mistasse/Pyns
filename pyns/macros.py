@@ -36,17 +36,17 @@ q.into = False
 
 @q.register
 @macro_inline
-def q(node, container, transform, **kwargs):
+def q(node, transform, **kwargs):
     print(ast_repr(node))
     with tmp_attr(q, into=True):
-        return locate(ast_genast(transform(node), _q_specific), container)
+        return ast_genast(transform(node), _q_specific)
 
 
 @q.register
 @macro_block
 def q(var, items, body, container, transform, **kwargs):
     with tmp_attr(q, into=True):
-        return locate(Assign(targets=[var], value=ast_genast(transform(body), _q_specific)), container)
+        return Assign(targets=[var], value=ast_genast(transform(body), _q_specific))
 
 
 @isolated
@@ -58,7 +58,7 @@ def test():
 @macro_inline
 @compile_with_macros(globals(), locals())
 def s(node, container, transform, **kwargs):
-    return locate(q[u[transform(node)].format(**locals())], container)
+    return q[u[transform(node)].format(**locals())]
 
 
 @macro_inline
@@ -78,4 +78,4 @@ class f(NodeTransformer):
         value = self.visit(transform(node))
         # we build the anonymous function
         n = q[lambda *_macro_args: u[value]]
-        return locate(n, container)
+        return n
