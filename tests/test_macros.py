@@ -113,6 +113,8 @@ if __name__ == '__main__' and with_macros(__name__, globals(), locals()):
             asrteq(f[s["lol"]](), x)
             asrteq(f[_0](s["{x}"]), x)
 
+            asrteq(s[f["{x}"]()], x)
+
             asrtast(q[ast[f[3]()]], Num(3))
             asrteq(q[u[f[1]]](), 1)
 

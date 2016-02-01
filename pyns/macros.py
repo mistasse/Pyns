@@ -2,9 +2,6 @@ from .core import *
 from .matching import *
 
 
-# TODO: Rewrite with macros and embedded nodes
-
-
 class _Embedded(AST):
     def __init__(self, node):
         self.node = node
@@ -37,7 +34,6 @@ q.into = False
 @q.register
 @macro_inline
 def q(node, transform, **kwargs):
-    print(ast_repr(node))
     with tmp_attr(q, into=True):
         return ast_genast(transform(node), _q_specific)
 
@@ -47,12 +43,6 @@ def q(node, transform, **kwargs):
 def q(var, items, body, container, transform, **kwargs):
     with tmp_attr(q, into=True):
         return Assign(targets=[var], value=ast_genast(transform(body), _q_specific))
-
-
-@isolated
-@compile_with_macros(globals(), locals())
-def test():
-    print(ast_repr(q[2*u[2]]))
 
 
 @macro_inline
