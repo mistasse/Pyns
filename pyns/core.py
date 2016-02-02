@@ -359,12 +359,12 @@ def ast_genast(tree, specific=None):
 
 def comp_expr(ast, name=None):
     if name is None:
-        name = unparse_code(ast)
+        name = unparse(ast)
     return compile(ast if isinstance(ast, Expression) else Expression(ast), name, 'eval')
 
 def comp_block(ast, name=None):
     if name is None:
-        name = unparse_code(ast)
+        name = unparse(ast)
     return compile(ast, '\n'.join(name), 'exec')
 
 #    ###     ######  ########    ##     ##  #######  ########  #### ######## #### ######## ########

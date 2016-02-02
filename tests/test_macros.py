@@ -22,6 +22,23 @@ class asrteq(Macro):
         return self.transform(n)
 
 
+@macro_block
+@compile_with_macros(globals(), locals())
+def asrt_fail(var, items, body, transform, **kwargs):
+    ret = []
+    for b in body:
+        with q as [t]:
+            try:
+                pass
+            except:
+                assert True
+            else:
+                assert False, 'Should have failed'
+        t.body[0] = transform(b)
+        ret.append(locate(t, b))
+    return ret
+
+
 @compile_with_macros(globals(), locals())
 class asrtast(Macro):
 
@@ -126,5 +143,9 @@ if __name__ == '__main__' and with_macros(__name__, globals(), locals()):
                 assert True
             else:
                 assert False, '''Shouldn't have found x in the local context of the quick lambda'''
+
+        def test_should_fail(self):
+            with asrt_fail:
+                assert False
 
     main()

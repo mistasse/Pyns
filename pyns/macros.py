@@ -3,22 +3,23 @@ from .matching import *
 
 
 class _Embedded(AST):
-    def __init__(self, node):
-        self.node = node
+    _fields = ('node',)
 
 
 @macro_inline
 def u(node, container, transform, **kwargs):
     if not q.into:
         raise AssertionError('Cannot use the u macro without being in a quote')
-    return _Embedded(locate(transform(node), container))
+    with tmp_attr(q, intro=False):
+        return _Embedded(locate(transform(node), container))
 
 
 @macro_inline
 def ast(node, container, transform, **kwargs):
     if not q.into:
         raise AssertionError('Cannot use the ast macro without being in a quote')
-    return _Embedded(locate(Call(Name('ast_genast', Load()), [transform(node)], []), container))
+    with tmp_attr(q, intro=False):
+        return _Embedded(locate(Call(Name('ast_genast', Load()), [transform(node)], []), container))
 
 
 def _q_specific(node):
