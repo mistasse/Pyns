@@ -1,4 +1,5 @@
 import re
+from collections import Iterable
 
 
 # a parser is a function of str, offset, returns (node, length)
@@ -17,8 +18,6 @@ class SugarParser:
 
     def __init__(self, parser):
         self._parser = parser
-        if not isinstance(parser, self.__class__):
-            setattr(parser, '_', parser)
 
     def __call__(self, str, offset=0):
         return self._parser(str, offset)
@@ -102,10 +101,20 @@ class SugarParser:
 
         return parse
 
+
+_SugarParser = SugarParser
+
+
+def desugarize(parser):
+    if isinstance(parser, Iterable):
+        return [p._parser if isinstance(p, _SugarParser) else p for p in parser]
+    return parser._parser if isinstance(parser, _SugarParser) else parser
+
+
 class DeferredParser(SugarParser):
-    def __init__(self, l):
+    def __init__(self, anon):
         def replace_and_parse(str, offset=0):
-            self._parser = p = l()
+            self._parser = p = anon()
             return p(str, offset)
         super(DeferredParser, self).__init__(replace_and_parse)
 
@@ -115,11 +124,10 @@ class DeferredParser(SugarParser):
             return
         return SugarParser.__setattr__(self, key, value)
 
-    def __pos__(self):
+    @property
+    def _(self):
         self('')
-        if not hasattr(self._parser, '__pos__'):
-            return self._parser
-        return +self._parser
+        return self._parser
 
 # ##    ##  #######  ########
 # ###   ## ##     ##    ##
@@ -130,6 +138,7 @@ class DeferredParser(SugarParser):
 # ##    ##  #######     ##
 
 def p_not(parser):
+    parser = desugarize(parser)
     @SugarParser
     def parse(str, offset=0):
         n, l = parser(str, offset)
@@ -189,7 +198,7 @@ def p_str(s):
 # ##     ##  #######  ########    ##
 
 def p_mult(parser, *, separator=p_regex(r'[\t\n ]*'), min_len=0):
-    parsers = [parser._ for parser in parsers]
+    parsers = desugarize(parsers)
     @SugarParser
     def parse(str, offset=0):
         nodes = []
@@ -226,6 +235,7 @@ def p_opt(parser, node=None):
     """
         p_opt returns an optional parser. That means that if parser doesn't match the string, a default node is returned
     """
+    parser = desugarize(parser)
     @SugarParser
     def parse(str, offset=0):
         return node, 0
@@ -247,7 +257,7 @@ def p_and(*parsers, extract=None, keep=_all):
         p_and returns a parser that matches a sequence of parser at the current offset. If one fails, the generated
         parser returns an error.
     """
-    parsers = [parser._ for parser in parsers]
+    parsers = desugarize(parsers)
     @SugarParser
     def parse(str, offset=0):
         nodes = [None for i in range(0, len(parsers) if keep is _all else len(keep))]
@@ -282,7 +292,7 @@ def p_phrase(*parsers, extract=None, keep=_all, wp=p_regex(r'[\t\n ]*')):
         by a call to the wp (whitespace parser). The whitespaces are discarded from the resulting list, and as soon as
         one fails, returns None, -1 (error)
     """
-    parsers = [parser._ for parser in parsers]
+    parsers = desugarize(parsers)
     @SugarParser
     def parse(str, offset=0):
         nodes = [None for i in range(0, len(parsers) if keep is _all else len(keep))]
@@ -320,7 +330,7 @@ def p_or(*parsers):
     """p_or returns a parser that returns the result of the first successful parser on the given string at the given
     offset
     """
-    parsers = [parser._ for parser in parsers]
+    parsers = desugarize(parsers)
     @SugarParser
     def parse(str, offset=0):
         for p in parsers:
@@ -340,5 +350,5 @@ def p_or(*parsers):
 # ##     ## ##       ##       ##       ##    ##
 # ########  ######## ##       ######## ##     ##
 
-def p_defer(parser=None):
-    return DeferredParser(parser)
+def p_defer(anon=None):
+    return DeferredParser(anon)

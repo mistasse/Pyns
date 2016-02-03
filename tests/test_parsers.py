@@ -45,9 +45,9 @@ class TestParsers(TestCase):
 class MemoryTest(TestCase):
 
     def test_ref(self):
-        tmpSugarParser = pyns.parsers.SugarParser
+        sugar_parser = pyns.parsers.SugarParser
         def _SugarParser(*args, **kwargs):
-            ret = tmpSugarParser(*args, **kwargs)
+            ret = sugar_parser(*args, **kwargs)
             refs.add(ret)
             return ret
 
@@ -57,7 +57,6 @@ class MemoryTest(TestCase):
             a = p_str('x')
             a = a._
             b = p_phrase(p_str(''), p_str(''))._
-            print(len(refs))
             gc.collect()
             assert len(refs) == 0
 
